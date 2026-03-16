@@ -295,10 +295,7 @@ def predict_plant(image_path):
     # Sort by confidence — highest first
     results.sort(key=lambda x: x["confidence"], reverse=True)
 
-    # If top result is very high confidence keep only that one
-    # Suppresses false secondary detections in complex scenes
-    if results and results[0]["confidence"] >= 92.0:
-        results = results[:1]
+   
 
     # Draw bounding boxes and save annotated image
     result_image_path = None
