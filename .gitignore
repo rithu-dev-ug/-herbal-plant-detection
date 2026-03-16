@@ -1,0 +1,14 @@
+venv/
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+*.pt
+*.h5
+*.jpg
+*.jpeg
+*.png
+dataset/
+yolo_dataset/
+static/uploads/
+static/results/

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Herbal Plant Detection</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+
+<body>
+
+    <div class="container">
+
+        <header>
+            <h1>Smart Herbal Plant Detection System</h1>
+            <p class="subtitle">Upload an image containing medicinal plants. The AI will identify all recognized
+                species and display their medicinal uses.</p>
+        </header>
+
+        <div class="card">
+            <h2>Analyze a Plant</h2>
+
+            <form id="upload-form" method="POST" enctype="multipart/form-data">
+
+                <div class="upload-area" id="drop-zone">
+                    <i class="fa-solid fa-leaf upload-icon"></i>
+                    <div class="upload-text">Drag & Drop your image here</div>
+                    <div class="upload-subtext">or click to browse files</div>
+                    <input type="file" name="image" id="file-input" accept="image/jpeg, image/png, image/jpg" required>
+                </div>
+
+                <div class="preview-container" id="preview-container">
+                    <img id="image-preview" src="#" alt="Image Preview">
+                    <div class="file-name" id="file-name-display"></div>
+                </div>
+
+                <button type="submit" class="btn-submit" id="submit-btn" disabled>
+                    <i class="fa-solid fa-magnifying-glass"></i> Identify Plant
+                </button>
+
+                <div class="loader-container" id="loader">
+                    <div class="spinner"></div>
+                    <p>Analyzing image... Please wait.</p>
+                </div>
+
+            </form>
+        </div>
+
+        <!-- ERROR STATE -->
+        {% if error %}
+        <div class="card result-card" style="border-left: 4px solid #ef5350;" id="results-section">
+            <div class="result-header">
+                <div>
+                    <h2 style="margin-bottom:0; border-bottom:none; color:#d32f2f;">Detection Failed</h2>
+                    <div class="plant-title" style="font-size:1.2rem; color:#b71c1c; margin-top:0.5rem;">
+                        {{ error }}
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% endif %}
+
+        <!-- ANNOTATED IMAGE WITH BOUNDING BOXES -->
+        {% if image %}
+        <div class="card" style="margin-bottom: 1.5rem;">
+            <h2 style="border-bottom: none; margin-bottom: 1rem;">
+                <i class="fa-solid fa-image"></i> Detection Visualization
+            </h2>
+            <img src="{{ image }}?t={{ range(1, 99999) | random }}"
+                 alt="Detected plants with bounding boxes"
+                 style="width: 100%; border-radius: 8px; border: 2px solid #2e8b57;">
+        </div>
+        {% endif %}
+
+        <!-- MULTI-PLANT RESULTS -->
+        {% if results %}
+
+        <div id="results-section">
+
+            <!-- Summary header -->
+            <div class="card" style="margin-bottom: 1rem;">
+                <h2 style="border-bottom: none; margin-bottom: 0;">
+                    <i class="fa-solid fa-seedling"></i>
+                    {% if results|length == 1 %}
+                        1 Medicinal Plant Detected
+                    {% else %}
+                        {{ results|length }} Medicinal Plants Detected
+                    {% endif %}
+                </h2>
+            </div>
+
+            <!-- One card per detected plant -->
+            {% for result in results %}
+            <div class="card result-card" style="margin-bottom: 1.5rem;">
+
+                <div class="result-header" style="flex-wrap: wrap; gap: 1rem;">
+                    <div style="flex: 1; min-width: 200px;">
+
+                        <!-- Plant number if multiple -->
+                        {% if results|length > 1 %}
+                        <div style="font-size: 0.85rem; color: #888; margin-bottom: 0.3rem;">
+                            Detection {{ loop.index }} of {{ results|length }}
+                        </div>
+                        {% endif %}
+
+                        <h2 style="margin-bottom:0; border-bottom:none;">Detection Results</h2>
+                        <div class="plant-title">{{ result.plant | replace("_", " ") | title }}</div>
+                    </div>
+
+                    <!-- Confidence badge -->
+                    {% set conf_color = 'badge-high' %}
+                    {% set prog_color = 'progress-high' %}
+                    {% if result.confidence < 70 %}
+                        {% set conf_color = 'badge-low' %}
+                        {% set prog_color = 'progress-low' %}
+                    {% elif result.confidence < 90 %}
+                        {% set conf_color = 'badge-medium' %}
+                        {% set prog_color = 'progress-medium' %}
+                    {% endif %}
+
+                    <div style="flex: 1; min-width: 250px; text-align: right;">
+                        <div class="confidence-badge {{ conf_color }}" style="display:inline-block; margin-bottom:0.5rem;">
+                            <i class="fa-solid fa-chart-bar"></i> Confidence: {{ result.confidence }}%
+                        </div>
+                        <div class="progress-container">
+                            <div class="progress-bar {{ prog_color }}" style="width: {{ result.confidence }}%;"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Medicinal info -->
+                <div class="info-grid">
+                    <div class="info-box">
+                        <h3><i class="fa-solid fa-notes-medical"></i> Medicinal Uses</h3>
+                        <p>{{ result.uses | safe }}</p>
+                    </div>
+                    <div class="info-box warning">
+                        <h3><i class="fa-solid fa-triangle-exclamation"></i> Precautions</h3>
+                        <p>{{ result.precautions }}</p>
+                    </div>
+                </div>
+
+            </div>
+            {% endfor %}
+
+        </div>
+
+        <script>
+            window.onload = function () {
+                const resultsSection = document.getElementById('results-section');
+                if (resultsSection) {
+                    resultsSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
+            }
+        </script>
+
+        {% endif %}
+
+    </div>
+
+    <script>
+        const fileInput       = document.getElementById('file-input');
+        const dropZone        = document.getElementById('drop-zone');
+        const previewContainer = document.getElementById('preview-container');
+        const imagePreview    = document.getElementById('image-preview');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const submitBtn       = document.getElementById('submit-btn');
+        const uploadForm      = document.getElementById('upload-form');
+        const loader          = document.getElementById('loader');
+
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, e => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.add('dragover'), false);
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropZone.addEventListener(eventName, () => dropZone.classList.remove('dragover'), false);
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            fileInput.files = e.dataTransfer.files;
+            handleFiles(e.dataTransfer.files);
+        });
+
+        fileInput.addEventListener('change', function () {
+            handleFiles(this.files);
+        });
+
+        function handleFiles(files) {
+            if (files.length > 0) {
+                const file = files[0];
+                if (file.type.startsWith('image/')) {
+                    const reader = new FileReader();
+                    reader.onload = function (e) {
+                        imagePreview.src               = e.target.result;
+                        previewContainer.style.display = 'block';
+                        fileNameDisplay.textContent    = file.name;
+                        submitBtn.disabled             = false;
+                        dropZone.querySelector('.upload-icon').style.display = 'none';
+                        dropZone.querySelector('.upload-text').style.display = 'none';
+                        dropZone.querySelector('.upload-subtext').textContent = "Click or drag to change image";
+                        dropZone.style.padding = '1rem';
+                    }
+                    reader.readAsDataURL(file);
+                }
+            }
+        }
+
+        uploadForm.addEventListener('submit', function () {
+            submitBtn.style.display = 'none';
+            loader.style.display    = 'flex';
+        });
+    </script>
+
+</body>
+</html>
