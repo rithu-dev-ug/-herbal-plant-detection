@@ -13,10 +13,19 @@ IMG_SIZE           = 224
 RESULTS_DIR        = "static/results"
 
 # ─────────────────────────────────────────────
-# CONFIDENCE THRESHOLDS
+# PER-SPECIES CONFIDENCE THRESHOLDS
+# Each species has its own threshold based on
+# how visually distinctive it is
 # ─────────────────────────────────────────────
-MIN_CONFIDENCE = 0.90   # higher threshold for sliding window
-MIN_MARGIN     = 0.25   # stronger margin requirement
+SPECIES_THRESHOLDS = {
+    "aloe_vera": 0.92,   # strict — very distinct, avoid false positives
+    "brahmi":    0.82,   # lenient — harder to detect, small round leaves
+    "centella":  0.88,   # balanced
+    "turmeric":  0.88,   # balanced
+}
+
+# Minimum margin between top and second prediction
+MIN_MARGIN = 0.20
 
 # ─────────────────────────────────────────────
 # COLOR MAP — different color per species
@@ -76,14 +85,10 @@ def preprocess(crop):
     normalized = resized / 255.0
     return np.expand_dims(normalized, axis=0)
 
-SPECIES_THRESHOLDS = {
-    "aloe_vera": 0.92,
-    "brahmi":    0.82,
-    "centella":  0.88,
-    "turmeric":  0.88,
-}
+
 # ─────────────────────────────────────────────
 # CLASSIFY SINGLE CROP
+# Uses per-species threshold — no global MIN_CONFIDENCE
 # ─────────────────────────────────────────────
 def classify_crop(crop):
     if crop.shape[0] < 40 or crop.shape[1] < 40:
@@ -96,40 +101,34 @@ def classify_crop(crop):
     top_probability    = sorted_probs[-1]
     second_probability = sorted_probs[-2]
     class_index        = np.argmax(prediction[0])
-    confidence         = top_probability
 
-    if confidence < MIN_CONFIDENCE:
-        return None
-
-    if (top_probability - second_probability) < MIN_MARGIN:
-        return None
-
+    # Get plant name first
     plant_name = classes.get(class_index, "unknown")
 
+    # Reject unknown class
     if plant_name == "unknown":
         return None
-    
-     # Use per-species threshold
-    threshold = SPECIES_THRESHOLDS.get(plant_name, MIN_CONFIDENCE)
-    if confidence < threshold:
+
+    # Per-species threshold — brahmi uses 0.82, aloe uses 0.92
+    threshold = SPECIES_THRESHOLDS.get(plant_name, 0.88)
+    if top_probability < threshold:
         return None
 
+    # Reject ambiguous predictions where margin is too small
     if (top_probability - second_probability) < MIN_MARGIN:
         return None
 
-    return (plant_name, float(confidence))
+    return (plant_name, float(top_probability))
 
 
 # ─────────────────────────────────────────────
 # NON-MAXIMUM SUPPRESSION
-# Merges overlapping boxes for the same plant
-# keeping only the highest confidence detection
+# Merges overlapping boxes keeping highest confidence
 # ─────────────────────────────────────────────
 def apply_nms(candidates, iou_threshold=0.3):
     if not candidates:
         return []
 
-    # Group by plant species
     by_plant = {}
     for c in candidates:
         p = c["plant"]
@@ -140,7 +139,6 @@ def apply_nms(candidates, iou_threshold=0.3):
     final = []
 
     for plant, items in by_plant.items():
-        # Sort by confidence descending
         items = sorted(items, key=lambda x: x["confidence"], reverse=True)
 
         kept = []
@@ -156,7 +154,6 @@ def apply_nms(candidates, iou_threshold=0.3):
                 x1i, y1i, x2i, y2i = item["box"]
                 area_i = (x2i - x1i) * (y2i - y1i)
 
-                # Intersection
                 ix1 = max(x1b, x1i)
                 iy1 = max(y1b, y1i)
                 ix2 = min(x2b, x2i)
@@ -174,7 +171,6 @@ def apply_nms(candidates, iou_threshold=0.3):
 
             items = remaining
 
-        # Keep best detection per plant
         final.append(kept[0])
 
     return final
@@ -235,46 +231,46 @@ def predict_plant(image_path):
     if img is None:
         return [], None, "Image could not be loaded."
 
+    img_area = img.shape[0] * img.shape[1]
+
     # Get sliding window candidates
     detections = detect_plants(image_path)
-    # If no detections at all, use full image as fallback
+
+    # Fallback only when sliding window finds nothing
     if not detections:
-       h, w = img.shape[:2]
-       detections = [{"crop": img, "box": (0, 0, w, h), "conf": 1.0}]
+        h, w = img.shape[:2]
+        detections = [{"crop": img, "box": (0, 0, w, h), "conf": 1.0}]
 
     # Classify every candidate region
     candidates = []
     for det in detections:
-        crop = det["crop"]
-        box  = det["box"]
-
-        # Reject crops that cover more than 70% of image area
-        # These are full-scene crops that confuse the classifier
-        img_area  = img.shape[0] * img.shape[1]
+        crop            = det["crop"]
+        box             = det["box"]
         x1, y1, x2, y2 = box
-        box_area  = (x2 - x1) * (y2 - y1)
+        box_area        = (x2 - x1) * (y2 - y1)
+
+        # Reject crops covering more than 60% of image
+        # Prevents full-scene crops from causing false predictions
         if box_area > 0.60 * img_area:
             continue
 
         prediction = classify_crop(crop)
-
         if prediction is None:
-           continue
+            continue
 
         plant_name, confidence = prediction
-        
-       
+
         candidates.append({
             "plant":      plant_name,
             "confidence": round(confidence * 100, 2),
             "box":        box
         })
 
-    # Apply NMS to remove overlapping boxes for same plant
+    # Apply NMS to collapse overlapping detections
     final_detections = apply_nms(candidates, iou_threshold=0.3)
 
-    # Build final results with medicinal info
-    results = []
+    # Build results with medicinal info
+    results     = []
     seen_plants = set()
 
     for det in final_detections:
@@ -296,15 +292,15 @@ def predict_plant(image_path):
             "box":         det["box"]
         })
 
-    results.sort(key=lambda x: x["confidence"], reverse=True)
+    # Sort by confidence — highest first
     results.sort(key=lambda x: x["confidence"], reverse=True)
 
-    # If top result has very high confidence, keep only that one
-    # This prevents false secondary detections in complex scenes
+    # If top result is very high confidence keep only that one
+    # Suppresses false secondary detections in complex scenes
     if results and results[0]["confidence"] >= 92.0:
-         results = results[:1]
+        results = results[:1]
 
-    # Draw bounding boxes
+    # Draw bounding boxes and save annotated image
     result_image_path = None
     if results:
         annotated         = draw_boxes(img, results)
