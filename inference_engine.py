@@ -253,7 +253,7 @@ def predict_plant(image_path):
         img_area  = img.shape[0] * img.shape[1]
         x1, y1, x2, y2 = box
         box_area  = (x2 - x1) * (y2 - y1)
-        if box_area > 0.50 * img_area:
+        if box_area > 0.60 * img_area:
             continue
 
         prediction = classify_crop(crop)
